@@ -1,0 +1,168 @@
+# === Hidden Markov Model for Animal Telemetry Data ===
+# This script fits a 3-state HMM to animal movement data using the momentuHMM package.
+# Input: Cleaned telemetry dataset with dive data and environmental covariates.
+# Output: Fitted HMM object (mbest), including model with covariates.
+
+
+library(tidyverse)
+library(lubridate)
+library(sf)
+library(tictoc)
+library(plotly)
+library(dplyr)
+library(momentuHMM)
+
+
+# === 2. Pre-Processing steps prior to Data Preparation ===
+# dataset includes cleaned telemetry data, with nighttime data removed
+# pre-processing steps included 
+# 1) removing nighttime data and trimming data when tags fell off or stopped tracking
+# 2) predicting regular GPS observations for HMM at 30-minute intervals using crawlWrap 
+# 3) running diveMove on depth sensor data, with a dive threshold of 1m, and duration of at least 6 seconds, then aggregating number of dive events per half hour increment, per individual
+# 4) merging dive data with 30-minute GPS data 
+# 5) extracting oceanographic covariate data at 30-minute resolution to align with GPS data
+
+# === 3. Data Preparation ===
+data_clean <- readRDS("path/to/your/data_clean_formodels.rds")
+
+splitAtGaps <- function(data, maxGap = 60, shortestTrack = 0, units = "mins") {
+  # Number of tracks
+  nTracks <- length(unique(data$ID))
+  
+  # Save old ID and reinitialise ID column
+  data$ID_old <- data$ID
+  data$ID <- character(nrow(data))
+  
+  # Loop over tracks (i.e., over IDs)
+  for(i_track in 1:nTracks) {
+    # Indices for this track
+    indThisTrack <- which(data$ID_old == unique(data$ID_old)[i_track])
+    trackLength <- length(indThisTrack)
+    
+    # Time intervals
+    dtimes <- difftime(data$time[indThisTrack[-1]],
+                       data$time[indThisTrack[-trackLength]],
+                       units = units)
+    
+    # Indices of gaps longer than maxGap
+    indGap <- c(0, which(dtimes > maxGap), trackLength)
+    
+    # Create new ID based on split track
+    subtrack_ID <- rep(1:(length(indGap) - 1), diff(indGap))
+    data$ID[indThisTrack] <- paste0(data$ID_old[indThisTrack],
+                                    "-", subtrack_ID)
+  }
+  
+  # Only keep sub-tracks longer than some duration
+  trackLengths <- sapply(unique(data$ID), function(id) {
+    ind <- which(data$ID == id)
+    difftime(data$time[ind[length(ind)]],
+             data$time[ind[1]],
+             units = units)
+  })
+  ID_keep <- names(trackLengths)[which(trackLengths >= shortestTrack)]
+  data <- subset(data, ID %in% ID_keep)
+  
+  return(data)
+}
+
+# shorten to 4 hours
+data_split <- splitAtGaps(data_clean, maxGap = 240, shortestTrack = 0, units = "mins") #4 hour gaps because we removed night data - so now every track is one day of movements 
+table(data_split$ID)
+
+## remove tracks with less than 5 points per track
+
+data_split_filtered <- data_split %>%
+  group_by(ID) %>%
+  filter(n() >= 5) %>% #momentuHMM requires at least 3 points per track
+  ungroup()
+
+table(data_split_filtered$ID)
+data_clean <- data_split_filtered[, c("ID", "time", "x", "y", "latitude", "longitude", "speed", "water_level_meters", "interval_start", "interval_end", "dive_count", "total_dive_duration", "salinity", "current_speed", "sst", "bathymetry_NOAA", "diatoms_values")]
+
+
+# === 4. Initial Parameter Exploration ===
+### run prepData from momentuHMM package
+data_prepped <- prepData(data_clean, type = 'UTM', coordNames = c("x", "y"))
+sum(data_prepped$step==0, na.rm = TRUE) # check for zeros to determine if we need zero mass parameters
+
+#find initial starting parameters
+#following 'A short guide to choosing initial parameter values for the estimation in moveHMM' by Michelot and Langrock (2025) 
+#https://cran.r-project.org/web/packages/moveHMM/vignettes/moveHMM-starting-values.pdf
+
+# For reproducibility
+set.seed(12345)
+
+# Number of tries with different starting values
+niter <- 25
+
+dists <- list(step = "gamma", angle = "vm", dive = "negbinom")
+
+# Save list of fitted models
+allm <- list()
+for(i in 1:niter) {
+  # Step length mean
+  stepMean0 <- runif(3,
+                     min = c(10, 200, 1000),
+                     max = c(75, 3200, 4000))
+  # Step length standard deviation
+  stepSD0 <- runif(3,
+                   min = c(10, 200, 1000),
+                   max = c(75, 2500, 4000))
+  stepPar0  <- c(stepMean0, stepSD0)
+  
+  # Turning angle concentration
+  angleCon0 <- runif(3,
+                     min = c(0.1, 5, 5),
+                     max = c(2, 15, 15))
+  
+  anglePar0  <- c(angleCon0)
+  
+  diveMean0 <- runif(3,
+                     min = c(0.1, 5, 0.1),
+                     max = c(1, 30, 15))
+  # Step length standard deviation
+  diveSD0 <- runif(3,
+                   min = c(0.1, 5, 0.1),
+                   max = c(1, 30, 15))
+  divePar0  <- c(diveMean0, diveSD0)
+  
+  # Combine into Par0 list
+  Par0 <- list(step = stepPar0,
+               angle = anglePar0,
+               dive = divePar0)
+  
+  allm[[i]] <- momentuHMM::fitHMM(data = data_prepped, nbStates = 3, dist=dists, Par0=Par0)
+}
+
+# Extract likelihoods of fitted models
+allnllk <- unlist(lapply(allm, function(m) m$mod$minimum))
+allnllk
+
+# Index of best fitting model (smallest negative log-likelihood)
+whichbest <- which.min(allnllk)
+# Best fitting model
+mbest <- allm[[whichbest]]
+mbest
+
+### run models with best-fitting parameter values from mbest
+
+
+# === 5. Model Fitting ===
+
+colnames(data_prepped)[colnames(data_prepped) == "dive_count"] <- "dive"
+
+nbStates <- 3 # 1 = resting, 2 = transiting, 3 = foraging
+stateNames <- c("resting", "foraging", "transit")
+dists <- list(step = "gamma", angle = "vm", dive = "negbinom")
+
+Par0 <- list(step = c(30, 800, 5000, 40, 1000, 7000),
+             angle = c(0, 0, 0, 0.01, 0.01, 1),
+             dive = c(0.2, 10, 6, 0.2, 5, 1))
+
+hmm_time_bathy_currents <- fitHMM(data = data_prepped, 
+                                  nbStates = 3, 
+                                  Par0 = Par0,
+                                  dist = dists,
+                                  estAngleMean = list(angle = TRUE),
+                                  formula = ~ cosinor(hour_of_day, period = 24) + bathymetry + current_speed) 
