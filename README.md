@@ -1,23 +1,17 @@
-# Hidden Markov Model for Animal Telemetry Data
+# Hidden Markov Model for Brandt's Cormorant Telemetry Data
 
-This repository contains R code for fitting a 3-state hidden Markov model (HMM) to animal movement data using the `momentuHMM` package. The model incorporates GPS and dive data, and environmental covariates.
+This repository contains R code specifically developed to fit a 3-state hidden Markov model (HMM) to telemetry data collected from Brandt's Cormorants in British Columbia, Canada. The analysis integrates GPS and dive data along with environmental covariates, as detailed in the accompanying manuscript. 
 
 ## Overview
 
-The analysis is designed for reference and transparency, rather than full reproducibility. Input data files are not included in this repository due to size.
-
-The main script file walks through:
-
-1. **Loading libraries**
-2. **Describing the preprocessing steps** that were done prior to this script
-3. **Preparing cleaned data for HMM input**
-4. **Exploring initial starting parameters** for model stability
-5. **Fitting the HMM** using telemetry data and environmental covariates
+This code supports the results and methods described in the manuscript by providing a transparent and reproducible workflow for fitting the HMM model to our cormorant telemetry data. It is not intended as a general-purpose HMM package or tutorial, but rather as a concrete example specific to this dataset and research questions.
 
 ## File Contents
+- `hmm_workflow.R` — Script implementing the HMM fitting process step-by-step, including data preparation, parameter exploration, and model fitting.
+- `output/` — Folder intended for saving model output objects.
 
-- `hmm_workflow.R` — Main analysis script with full code, broken into clearly labeled steps.
-- `output/` — Folder where you can save your fitted model object if desired.
+## Data
+Due to size and privacy, raw data files are not included here. The workflow assumes preprocessed telemetry and environmental covariate data in the form of "path/to/your/data_clean_formodels.rds". Preprocessing steps are described in the manuscript and in the comments of the script.
 
 ## Requirements
 
@@ -33,7 +27,7 @@ The main script file walks through:
 
 ## Notes
 
-- Input data is referenced as `"path/to/your/data_clean_formodels.rds"` and should include movement and environmental covariate data.
-- Preprocessing steps (e.g., regularizing tracks, summarizing dives) are described in the comments but are not part of this script.
-- This repository is meant to support the methods described in an accompanying manuscript.
+The code is tailored to our specific dataset and analysis goals. Adapting it to other species or data may require modification.
+Comments within the script describe preprocessing assumptions and model fitting details.
+This repository is meant to support the methods described in an accompanying manuscript.
 
