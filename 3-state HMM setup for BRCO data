@@ -166,3 +166,21 @@ hmm_time_bathy_currents <- fitHMM(data = data_prepped,
                                   dist = dists,
                                   estAngleMean = list(angle = TRUE),
                                   formula = ~ cosinor(hour_of_day, period = 24) + bathymetry + current_speed) 
+
+# === 6. Exploring Model Results ===
+
+### take input data from model and attach viterbi states to it 
+hmm_data <- time_bathy_currents$data
+viterbi_states <- viterbi(time_bathy_currents)
+hmm_data$viterbi_state <- viterbi_states # Add to dataset
+
+plot(hmm_time_bathy_currents, plotCI = TRUE, plotStationary = TRUE) #plot with CI 
+#shows density plots for data streams (step, angle, dive count)
+#indicates transition probabilities as function of covariates for each state transition in the matrix, and stationary state probabilities
+
+timeInStates(hmm_time_bathy_currents) 36% resting, 41% foraging, and 23% transiting
+
+stationary(hmm_time_bathy_currents) #gets stationary state probabilities plotted above per observation
+
+### Compare among models ###
+BIC(hmm_time_bathy_currents) #lowest BIC and also interpretable
