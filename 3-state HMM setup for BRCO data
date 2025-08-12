@@ -1,9 +1,21 @@
 # === Hidden Markov Model for Animal Telemetry Data ===
-# This script fits a 3-state HMM to animal movement data using the momentuHMM package.
-# Input: Cleaned telemetry dataset with dive data and environmental covariates.
-# Output: Fitted HMM object (mbest), including model with covariates.
+# Purpose:
+#   This script fits a 3-state hidden Markov model (HMM) to animal movement data
+#   using the momentuHMM package. It is tailored to our specific dataset,
+#   integrating GPS movement, dive counts, and environmental covariates.
+#
+# Input:
+#   Cleaned telemetry dataset (preprocessed: daytime only, regularized positions,
+#   merged with dive metrics and environmental covariates)
+#
+# Output:
+#   Best-fitting HMM object (`mbest`) and example model fit (`hmm_time_bathy_currents`)
+#
+# Note:
+#   This script is specific to our manuscript analysis and not intended
+#   as a general-purpose HMM implementation.
 
-
+# - Load required libraries -
 library(tidyverse)
 library(lubridate)
 library(sf)
@@ -13,18 +25,26 @@ library(dplyr)
 library(momentuHMM)
 
 
-# === 2. Pre-Processing steps prior to Data Preparation ===
-# dataset includes cleaned telemetry data, with nighttime data removed
-# pre-processing steps included 
-# 1) removing nighttime data and trimming data when tags fell off or stopped tracking
-# 2) predicting regular GPS observations for HMM at 30-minute intervals using crawlWrap 
-# 3) running diveMove on depth sensor data, with a dive threshold of 1m, and duration of at least 6 seconds, then aggregating number of dive events per half hour increment, per individual
-# 4) merging dive data with 30-minute GPS data 
-# 5) extracting oceanographic covariate data at 30-minute resolution to align with GPS data
+#  === 2. Preprocessing Summary (done before this script) ===
+# The input dataset is already preprocessed as follows:
+# 1) Removed nighttime locations; trimmed tracks when tags stopped transmitting
+# 2) Predicted regular GPS observations at 30-minute intervals using `crawlWrap`
+# 3) Extracted dive events from depth sensor data (threshold: 1 m depth, ≥ 6 sec duration)
+#    and aggregated dive counts per 30-min interval per individual
+# 4) Merged dive data with GPS track data
+# 5) Extracted oceanographic covariates at matching timestamps
+
+# This script starts from the cleaned dataset and prepares it for HMM fitting.
+
 
 # === 3. Data Preparation ===
+# We split tracks at large time gaps to ensure each segment is continuous.
+# This is important for HMMs because large temporal gaps violate the assumption of regularly spaced observations.
+
+#bring in data
 data_clean <- readRDS("path/to/your/data_clean_formodels.rds")
 
+#splitAtGapss splits telemetry tracks into sub-tracks when time gaps between observations 
 splitAtGaps <- function(data, maxGap = 60, shortestTrack = 0, units = "mins") {
   # Number of tracks
   nTracks <- length(unique(data$ID))
@@ -68,23 +88,30 @@ splitAtGaps <- function(data, maxGap = 60, shortestTrack = 0, units = "mins") {
 
 # shorten to 4 hours
 data_split <- splitAtGaps(data_clean, maxGap = 240, shortestTrack = 0, units = "mins") #4 hour gaps because we removed night data - so now every track is one day of movements 
-table(data_split$ID)
+table(data_split$ID) # check number of sub-tracks
 
-## remove tracks with less than 5 points per track
+# - Remove short tracks -
+# Keep only tracks with ≥ 5 points (momentuHMM requires ≥ 3 per track, but we use 5 for stability)
 
 data_split_filtered <- data_split %>%
   group_by(ID) %>%
-  filter(n() >= 5) %>% #momentuHMM requires at least 3 points per track
+  filter(n() >= 5) %>%
   ungroup()
 
-table(data_split_filtered$ID)
+table(data_split_filtered$ID) # check number of sub-tracks after splitting
+
+# Keep only relevant columns for model input
 data_clean <- data_split_filtered[, c("ID", "time", "x", "y", "latitude", "longitude", "speed", "water_level_meters", "interval_start", "interval_end", "dive_count", "total_dive_duration", "salinity", "current_speed", "sst", "bathymetry_NOAA", "diatoms_values")]
 
 
 # === 4. Initial Parameter Exploration ===
+# Identify robust starting parameter values for the HMM to avoid convergence failures or suboptimal fits.
+# We try multiple random starting values (niter = 25) to find a stable set that gives the lowest negative log-likelihood
+
+# - Prepare data for momentuHMM -
 ### run prepData from momentuHMM package
 data_prepped <- prepData(data_clean, type = 'UTM', coordNames = c("x", "y"))
-sum(data_prepped$step==0, na.rm = TRUE) # check for zeros to determine if we need zero mass parameters
+sum(data_prepped$step==0, na.rm = TRUE) # count zero step lengths — if there are many, consider adding a zero-mass parameter
 
 #find initial starting parameters
 #following 'A short guide to choosing initial parameter values for the estimation in moveHMM' by Michelot and Langrock (2025) 
@@ -93,14 +120,19 @@ sum(data_prepped$step==0, na.rm = TRUE) # check for zeros to determine if we nee
 # For reproducibility
 set.seed(12345)
 
-# Number of tries with different starting values
-niter <- 25
+niter <- 25 # number of starting parameter sets to try
 
 dists <- list(step = "gamma", angle = "vm", dive = "negbinom")
+# Distributions for each data stream:
+#   step length → gamma
+#   turning angle → von Mises (vm)
+#   dive count → negative binomial
 
-# Save list of fitted models
+# Store all fitted models here
 allm <- list()
+
 for(i in 1:niter) {
+  # Randomly generate plausible starting means and SDs for step length
   # Step length mean
   stepMean0 <- runif(3,
                      min = c(10, 200, 1000),
@@ -111,27 +143,29 @@ for(i in 1:niter) {
                    max = c(75, 2500, 4000))
   stepPar0  <- c(stepMean0, stepSD0)
   
-  # Turning angle concentration
+  # Turning angle concentration parameters (higher = more directional)
   angleCon0 <- runif(3,
                      min = c(0.1, 5, 5),
                      max = c(2, 15, 15))
   
   anglePar0  <- c(angleCon0)
-  
+
+  # Dive count distribution parameters
   diveMean0 <- runif(3,
                      min = c(0.1, 5, 0.1),
                      max = c(1, 30, 15))
-  # Step length standard deviation
+
   diveSD0 <- runif(3,
                    min = c(0.1, 5, 0.1),
                    max = c(1, 30, 15))
   divePar0  <- c(diveMean0, diveSD0)
   
-  # Combine into Par0 list
+  # # Bundle into Par0 list for momentuHMM
   Par0 <- list(step = stepPar0,
                angle = anglePar0,
                dive = divePar0)
-  
+
+ # Fit the HMM with these starting values
   allm[[i]] <- momentuHMM::fitHMM(data = data_prepped, nbStates = 3, dist=dists, Par0=Par0)
 }
 
@@ -143,19 +177,26 @@ allnllk
 whichbest <- which.min(allnllk)
 # Best fitting model
 mbest <- allm[[whichbest]]
-mbest
-
-### run models with best-fitting parameter values from mbest
+mbest # view summary
+# run models with best-fitting parameter values from mbest
 
 
 # === 5. Model Fitting ===
+# Use best-fitting starting values and fit the model with covariates.
 
+# Rename dive_count for compatibility with momentuHMM
 colnames(data_prepped)[colnames(data_prepped) == "dive_count"] <- "dive"
 
 nbStates <- 3 # 1 = resting, 2 = transiting, 3 = foraging
+# States:
+#   1 = resting  → short step length, low dive counts
+#   2 = foraging → intermediate step length, high dive counts
+#   3 = transit  → long step length, low dive counts
+
 stateNames <- c("resting", "foraging", "transit")
 dists <- list(step = "gamma", angle = "vm", dive = "negbinom")
 
+# Manually set starting parameters (based on mbest)
 Par0 <- list(step = c(30, 800, 5000, 40, 1000, 7000),
              angle = c(0, 0, 0, 0.01, 0.01, 1),
              dive = c(0.2, 10, 6, 0.2, 5, 1))
@@ -170,15 +211,19 @@ hmm_time_bathy_currents <- fitHMM(data = data_prepped,
 # === 6. Exploring Model Results ===
 
 ### take input data from model and attach viterbi states to it 
-hmm_data <- time_bathy_currents$data
-viterbi_states <- viterbi(time_bathy_currents)
+hmm_data <- hmm_time_bathy_currents$data
+viterbi_states <- viterbi(hmm_time_bathy_currents)
 hmm_data$viterbi_state <- viterbi_states # Add to dataset
 
-plot(hmm_time_bathy_currents, plotCI = TRUE, plotStationary = TRUE) #plot with CI 
-#shows density plots for data streams (step, angle, dive count)
-#indicates transition probabilities as function of covariates for each state transition in the matrix, and stationary state probabilities
+# - Plot model output -
+# This shows:
+#   - Data stream distributions per state
+#   - Transition probabilities vs. covariates
+#   - Stationary state probabilities
 
-timeInStates(hmm_time_bathy_currents) 36% resting, 41% foraging, and 23% transiting
+plot(hmm_time_bathy_currents, plotCI = TRUE, plotStationary = TRUE) #plot with CI
+
+timeInStates(hmm_time_bathy_currents) 36% resting, 41% foraging, and 23% transiting #values indicate proportion of total time in each behaviour state.
 
 stationary(hmm_time_bathy_currents) #gets stationary state probabilities plotted above per observation
 
