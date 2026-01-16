@@ -43,6 +43,8 @@ library(momentuHMM)
 
 #bring in data
 data_clean <- readRDS("path/to/your/data_clean_formodels.rds")
+# File path shown for reference only; users should replace with their own data if adapting this script
+
 
 #splitAtGapss splits telemetry tracks into sub-tracks when time gaps between observations 
 splitAtGaps <- function(data, maxGap = 60, shortestTrack = 0, units = "mins") {
@@ -122,11 +124,13 @@ set.seed(12345)
 
 niter <- 25 # number of starting parameter sets to try
 
+# Distributions used in the final model as described in the manuscript:
 dists <- list(step = "gamma", angle = "vm", dive = "negbinom")
 # Distributions for each data stream:
 #   step length → gamma
 #   turning angle → von Mises (vm)
 #   dive count → negative binomial
+
 
 # Store all fitted models here
 allm <- list()
