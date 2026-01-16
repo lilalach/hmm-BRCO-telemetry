@@ -223,7 +223,8 @@ hmm_data$viterbi_state <- viterbi_states # Add to dataset
 
 plot(hmm_time_bathy_currents, plotCI = TRUE, plotStationary = TRUE) #plot with CI
 
-timeInStates(hmm_time_bathy_currents) 36% resting, 41% foraging, and 23% transiting #values indicate proportion of total time in each behaviour state.
+timeInStates(hmm_time_bathy_currents) 
+#36% resting, 41% foraging, and 23% transiting #values indicate proportion of total time in each behaviour state.
 
 stationary(hmm_time_bathy_currents) #gets stationary state probabilities plotted above per observation
 
