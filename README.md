@@ -27,7 +27,8 @@ Due to size and privacy, raw data files are not included here. The workflow assu
 
 ## Notes
 
-The code is tailored to our specific dataset and analysis goals. Adapting it to other species or data may require modification.
+The code is tailored to our specific dataset and analysis goals. Adapting it to other species or data may require modification. It has not been generalized, optimized, or tested for use with other datasets.
+
 Comments within the script describe preprocessing assumptions and model fitting details.
 This repository is meant to support the methods described in an accompanying manuscript.
 
