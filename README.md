@@ -4,7 +4,7 @@ This repository contains R code specifically developed to fit a 3-state hidden M
 
 ## Overview
 
-This code supports the results and methods described in the manuscript by providing a transparent and reproducible workflow for fitting the HMM model to our cormorant telemetry data. It is not intended as a general-purpose HMM package or tutorial, but rather as a concrete example specific to this dataset and research questions.
+This code supports the results and methods described in the manuscript by providing annotated script documenting the analytical steps for fitting the HMM model to our cormorant telemetry data. It is not intended as a general-purpose HMM package or tutorial, but rather as a concrete example specific to this dataset and research questions.
 
 ## File Contents
 - `hmm_workflow.R` — Script implementing the HMM fitting process step-by-step, including data preparation, parameter exploration, and model fitting.
